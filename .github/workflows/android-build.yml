@@ -1,4 +1,3 @@
-
 name: Build PaperDollTouch Android ARM64
 
 on:
@@ -6,6 +5,7 @@ on:
   push:
     paths:
       - "PaperDollTouch-source.zip"
+      - "PaperDollTouch-source-fixed.zip"
       - ".github/workflows/android-build.yml"
 
 permissions:
@@ -14,7 +14,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,25 +25,29 @@ jobs:
 
       - name: Extract source ZIP
         run: |
-          test -f PaperDollTouch-source.zip
           mkdir -p source
-          unzip -q PaperDollTouch-source.zip -d source
+          if [ -f PaperDollTouch-source-fixed.zip ]; then
+            SOURCE_ZIP=PaperDollTouch-source-fixed.zip
+          elif [ -f PaperDollTouch-source.zip ]; then
+            SOURCE_ZIP=PaperDollTouch-source.zip
+          else
+            echo "No PaperDollTouch source ZIP found" >&2
+            exit 2
+          fi
+          echo "Building source from $SOURCE_ZIP"
+          unzip -q "$SOURCE_ZIP" -d source
           test -f source/PaperDollTouch-project/CMakeLists.txt
 
-      - name: Run portable core tests
+      - name: Run portable cursor-core tests
         run: |
-          cmake -S source/PaperDollTouch-project \
-            -B build-host -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug
+          cmake -S source/PaperDollTouch-project -B build-host -G Ninja -DCMAKE_BUILD_TYPE=Debug
           cmake --build build-host
           ctest --test-dir build-host --output-on-failure
 
-      
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
-
 
       - name: Install Android NDK
         run: |
@@ -65,14 +68,15 @@ jobs:
             -DMOD_AUTHOR=PaperDollTouch \
             -DMOD_VERSION=0.2.0 \
             -DMOD_LIBRARY_NAME=PaperDollTouch \
-            '-DMOD_MINECRAFT_VERSIONS=["1.26.60"]'
+            '-DMOD_MINECRAFT_VERSIONS=["1.26.60*"]'
 
       - name: Compile and package
         run: |
-          cmake --build build-android \
-            --target levi_package --parallel 2
+          cmake --build build-android --target levi_package --parallel 2
           test -f build-android/libPaperDollTouch.so
           test -f build-android/PaperDollTouch-0.2.0-arm64-v8a.levipack
+          unzip -p build-android/PaperDollTouch-0.2.0-arm64-v8a.levipack PaperDollTouch/manifest.json | tee build-android/packaged-manifest.json
+          grep -F '"1.26.60*"' build-android/packaged-manifest.json
 
       - name: Upload build artifacts
         if: success()
@@ -82,4 +86,5 @@ jobs:
           path: |
             build-android/PaperDollTouch-0.2.0-arm64-v8a.levipack
             build-android/libPaperDollTouch.so
+            build-android/packaged-manifest.json
           if-no-files-found: error
